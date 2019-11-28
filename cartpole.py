@@ -16,11 +16,15 @@ from ModifiedTensorBoard import ModifiedTensorBoard
 
 ENV_NAME = "CartPole-v1"
 
-GAMMA = 0.9
+#GAMMA = 0.9
+GAMMA = 1
 LEARNING_RATE = 0.001
 
 MEMORY_SIZE = 2000
 BATCH_SIZE = 32
+
+C = 16
+counter_to_up_target = 0
 
 EXPLORATION_MAX = 1.0
 EXPLORATION_MIN = 0.01
@@ -28,46 +32,60 @@ EXPLORATION_DECAY = 0.9995
 
 currTime = datetime.datetime.now()
 timestr = str(currTime.hour) + "_" + str(currTime.minute) + "_" + str(currTime.second)
+MODEL_NAME = None
 
 
 class DQNSolver:
 
-    def __init__(self, observation_space, action_space,threeLayers):
+    def __init__(self, observation_space, action_space, threeLayers):
+        global MODEL_NAME
         self.exploration_rate = EXPLORATION_MAX
 
         self.action_space = action_space
         self.memory = deque(maxlen=MEMORY_SIZE)
 
-        self.model = Sequential()
-        if threeLayers:
-            self.model.add(Dense(24, input_shape=(observation_space,), activation="relu"))
-            self.model.add(Dense(128, activation="relu"))
-            self.model.add(Dropout(0.8))
-            self.model.add(Dense(256, activation="relu"))
-            self.model.add(Dropout(0.8))
-            self.model.add(Dense(128, activation="relu"))
-            self.model.add(Dropout(0.8))
-            self.model.add(Dense(self.action_space, activation="linear"))
-            MODEL_NAME = 'Model3-' + timestr
-
-        else:
-            self.model.add(Dense(24, input_shape=(observation_space,), activation="relu"))
-            self.model.add(Dense(128, activation="relu"))
-            self.model.add(Dropout(0.8))
-            self.model.add(Dense(256, activation="relu"))
-            self.model.add(Dropout(0.8))
-            self.model.add(Dense(512, activation="relu"))
-            self.model.add(Dropout(0.8))
-            self.model.add(Dense(256, activation="relu"))
-            self.model.add(Dropout(0.8))
-            self.model.add(Dense(128, activation="relu"))
-            self.model.add(Dropout(0.8))
-            self.model.add(Dense(self.action_space, activation="linear"))
-            MODEL_NAME = 'Model5-' + timestr
-        self.model.compile(loss="mse", optimizer=Adam(lr=LEARNING_RATE))
+        self.model = self.get_model(observation_space, threeLayers)
+        self.target_model = self.get_model(observation_space, threeLayers)
 
         # Custom tensorboard object
         self.tensorboard = ModifiedTensorBoard(log_dir="logs/{}-{}".format(MODEL_NAME, int(time.time())))
+
+    def get_model(self, observation_space, three_layers):
+        if three_layers:
+            return self.get_three_layer_model(observation_space)
+        else:
+            return self.get_five_layer_model(observation_space)
+
+    def get_three_layer_model(self, observation_space):
+        global MODEL_NAME
+        model = Sequential()
+        model.add(Dense(24, input_shape=(observation_space,), activation="relu"))
+        model.add(Dense(24, activation="relu"))
+        model.add(Dense(24, activation="relu"))
+        model.add(Dense(24, activation="relu"))
+        '''earlier:
+        model.add(Dense(48, activation="relu"))
+        model.add(Dense(96, activation="relu"))
+        model.add(Dense(48, activation="relu"))
+        '''
+        model.add(Dense(self.action_space, activation="linear"))
+        MODEL_NAME = 'Model3-' + timestr
+        model.compile(loss="mse", optimizer=Adam(lr=LEARNING_RATE))
+        return model
+
+    def get_five_layer_model(self, observation_space):
+        global MODEL_NAME
+        model = Sequential()
+        model.add(Dense(24, input_shape=(observation_space,), activation="relu"))
+        model.add(Dense(48, activation="relu"))
+        model.add(Dense(96, activation="relu"))
+        model.add(Dense(192, activation="relu"))
+        model.add(Dense(96, activation="relu"))
+        model.add(Dense(48, activation="relu"))
+        model.add(Dense(self.action_space, activation="linear"))
+        MODEL_NAME = 'Model5-' + timestr
+        model.compile(loss="mse", optimizer=Adam(lr=LEARNING_RATE))
+        return model
 
     def remember(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
@@ -79,16 +97,22 @@ class DQNSolver:
         return np.argmax(q_values[0])
 
     def experience_replay(self):
+        global counter_to_up_target, C
         if len(self.memory) < BATCH_SIZE:
             return
         batch = random.sample(self.memory, BATCH_SIZE)
         for state, action, reward, state_next, terminal in batch:
             q_update = reward
             if not terminal:
-                q_update = (reward + GAMMA * np.amax(self.model.predict(state_next)[0]))
-            q_values = self.model.predict(state)
+                q_update = (reward + GAMMA * np.amax(self.target_model.predict(state_next)[0]))
+            q_values = self.target_model.predict(state)
             q_values[0][action] = q_update
             self.model.fit(state, q_values, verbose=0,callbacks=[self.tensorboard] if terminal else None)
+
+            counter_to_up_target += 1
+            if counter_to_up_target >= C:
+                counter_to_up_target = 0
+                self.target_model.set_weights(self.model.get_weights())
         self.exploration_rate *= EXPLORATION_DECAY
         self.exploration_rate = max(EXPLORATION_MIN, self.exploration_rate)
 
@@ -100,7 +124,7 @@ def cartpole(threeLayers):
     action_space = env.action_space.n
     dqn_solver = DQNSolver(observation_space, action_space,threeLayers)
     run = 0
-
+    counter_to_up_target = 0
     sum = 0
     while True:
         run += 1
@@ -137,4 +161,4 @@ def cartpole(threeLayers):
 
 
 if __name__ == "__main__":
-    cartpole(threeLayers=False)
+    cartpole(threeLayers=True)
