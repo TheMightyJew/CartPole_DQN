@@ -7,25 +7,17 @@ import numpy as np
 from collections import deque
 from keras.models import Sequential
 from keras.layers import Dense
-from keras.layers import Dropout
 from keras.optimizers import Adam
 from ModifiedTensorBoard import ModifiedTensorBoard
 
-
-#from scores.score_logger import ScoreLogger
-
 ENV_NAME = "CartPole-v1"
 
-#GAMMA = 0.9
 GAMMA = 1
 LEARNING_RATE = 0.001
-
-MEMORY_SIZE = 2000
+MEMORY_SIZE = 100
 BATCH_SIZE = 32
-
 C = 16
 counter_to_up_target = 0
-
 EXPLORATION_MAX = 1.0
 EXPLORATION_MIN = 0.01
 EXPLORATION_DECAY = 0.9995
@@ -46,6 +38,7 @@ class DQNSolver:
 
         self.model = self.get_model(observation_space, threeLayers)
         self.target_model = self.get_model(observation_space, threeLayers)
+        self.target_model.set_weights(self.model.get_weights())
 
         # Custom tensorboard object
         self.tensorboard = ModifiedTensorBoard(log_dir="logs/{}-{}".format(MODEL_NAME, int(time.time())))
@@ -90,6 +83,7 @@ class DQNSolver:
     def remember(self, state, action, reward, next_state, done):
         self.memory.append((state, action, reward, next_state, done))
 
+
     def act(self, state):
         if np.random.rand() < self.exploration_rate:
             return random.randrange(self.action_space)
@@ -107,22 +101,21 @@ class DQNSolver:
                 q_update = (reward + GAMMA * np.amax(self.target_model.predict(state_next)[0]))
             q_values = self.target_model.predict(state)
             q_values[0][action] = q_update
-            self.model.fit(state, q_values, verbose=0,callbacks=[self.tensorboard] if terminal else None)
-
-            counter_to_up_target += 1
-            if counter_to_up_target >= C:
-                counter_to_up_target = 0
-                self.target_model.set_weights(self.model.get_weights())
+            self.model.fit(state, q_values, verbose=0, callbacks=[self.tensorboard] if terminal else None)
+        counter_to_up_target += 1
+        if counter_to_up_target >= C:
+            counter_to_up_target = 0
+            self.target_model.set_weights(self.model.get_weights())
         self.exploration_rate *= EXPLORATION_DECAY
         self.exploration_rate = max(EXPLORATION_MIN, self.exploration_rate)
 
 
 def cartpole(threeLayers):
+    global counter_to_up_target
     env = gym.make(ENV_NAME)
-    #score_logger = ScoreLogger(ENV_NAME)
     observation_space = env.observation_space.shape[0]
     action_space = env.action_space.n
-    dqn_solver = DQNSolver(observation_space, action_space,threeLayers)
+    dqn_solver = DQNSolver(observation_space, action_space, threeLayers)
     run = 0
     counter_to_up_target = 0
     sum = 0
@@ -140,14 +133,12 @@ def cartpole(threeLayers):
             #env.render()
             action = dqn_solver.act(state)
             state_next, reward, terminal, info = env.step(action)
-            reward = reward if not terminal else -reward
+            #reward = reward if not terminal else -reward
             state_next = np.reshape(state_next, [1, observation_space])
             dqn_solver.remember(state, action, reward, state_next, terminal)
             state = state_next
             if terminal:
-                print ("Run: " + str(run) + ", exploration: " + str(dqn_solver.exploration_rate) + ", score: " + str(step))
-                #score_logger.add_score(step, run)
-
+                print("Run: " + str(run) + ", exploration: " + str(dqn_solver.exploration_rate) + ", score: " + str(step))
                 sum += step
                 averageSize = 1
                 if run%averageSize == 0:
